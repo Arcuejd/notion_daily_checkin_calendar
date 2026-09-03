@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Notion 日历打卡</title>
+<style>
+  :root{
+    --bg:#f7f7f5;
+    --card:#ffffff;
+    --text:#2f3437;
+    --muted:#8b8f94;
+    --line:#e9e9e7;
+    --accent:#2f3437;
+    --done:#dfeedd;
+    --today:#fff1c7;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0;
+    padding:18px;
+    background:var(--bg);
+    color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+  }
+  .widget{
+    max-width:760px;
+    margin:auto;
+    background:var(--card);
+    border:1px solid var(--line);
+    border-radius:16px;
+    padding:18px;
+    box-shadow:0 6px 20px rgba(0,0,0,.05);
+  }
+  .top{
+    display:flex;
+    justify-content:space-between;
+    align-items:flex-start;
+    gap:12px;
+    flex-wrap:wrap;
+  }
+  h1{
+    margin:0;
+    font-size:20px;
+  }
+  .task-edit{
+    margin-top:7px;
+    color:var(--muted);
+    font-size:13px;
+  }
+  #taskName{
+    border:none;
+    border-bottom:1px dashed #bbb;
+    outline:none;
+    font:inherit;
+    color:var(--text);
+    width:180px;
+    background:transparent;
+  }
+  .stats{
+    display:flex;
+    gap:10px;
+    flex-wrap:wrap;
+  }
+  .pill{
+    background:#f2f2f0;
+    border-radius:999px;
+    padding:8px 11px;
+    font-size:13px;
+  }
+  .nav{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    margin:18px 0 12px;
+  }
+  .nav button{
+    border:1px solid var(--line);
+    background:#fff;
+    border-radius:9px;
+    width:36px;
+    height:32px;
+    cursor:pointer;
+    font-size:18px;
+  }
+  #monthLabel{font-weight:650}
+  .weekdays,.calendar{
+    display:grid;
+    grid-template-columns:repeat(7,1fr);
+    gap:7px;
+  }
+  .weekdays div{
+    text-align:center;
+    font-size:12px;
+    color:var(--muted);
+    padding:5px 0;
+  }
+  .day{
+    min-height:76px;
+    border:1px solid var(--line);
+    border-radius:11px;
+    padding:8px;
+    cursor:pointer;
+    user-select:none;
+    transition:.15s ease;
+    position:relative;
+    background:#fff;
+  }
+  .day:hover{transform:translateY(-1px); box-shadow:0 3px 8px rgba(0,0,0,.05)}
+  .day.empty{border-color:transparent;background:transparent;cursor:default;box-shadow:none}
+  .day.done{background:var(--done)}
+  .day.today{outline:2px solid #d9b64b;background:var(--today)}
+  .day.today.done{background:#dfeedd}
+  .num{font-size:13px;font-weight:600}
+  .check{
+    position:absolute;
+    right:8px;
+    bottom:8px;
+    width:25px;
+    height:25px;
+    border:1.5px solid #c9c9c6;
+    border-radius:7px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    font-weight:800;
+    color:#fff;
+    background:#fff;
+  }
+  .done .check{
+    background:var(--accent);
+    border-color:var(--accent);
+  }
+  .hint{
+    margin-top:14px;
+    font-size:12px;
+    color:var(--muted);
+    text-align:center;
+  }
+  @media(max-width:560px){
+    body{padding:8px}
+    .widget{padding:13px;border-radius:12px}
+    .weekdays,.calendar{gap:4px}
+    .day{min-height:58px;padding:6px}
+    .check{width:21px;height:21px;right:6px;bottom:6px}
+  }
+</style>
+</head>
+<body>
+<div class="widget">
+  <div class="top">
+    <div>
+      <h1>📅 每日打卡</h1>
+      <div class="task-edit">任务：
+        <input id="taskName" value="今日任务" maxlength="30" />
+      </div>
+    </div>
+    <div class="stats">
+      <div class="pill">本月完成 <b id="monthDone">0</b> 天</div>
+      <div class="pill">连续打卡 <b id="streak">0</b> 天</div>
+    </div>
+  </div>
+
+  <div class="nav">
+    <button id="prev">‹</button>
+    <div id="monthLabel"></div>
+    <button id="next">›</button>
+  </div>
+
+  <div class="weekdays">
+    <div>一</div><div>二</div><div>三</div><div>四</div><div>五</div><div>六</div><div>日</div>
+  </div>
+  <div class="calendar" id="calendar"></div>
+
+  <div class="hint">点击日期即可打钩 / 取消。记录保存在当前浏览器中。</div>
+</div>
+
+<script>
+const KEY='notionHabitCalendar_v1';
+const TASK_KEY='notionHabitTask_v1';
+let done = JSON.parse(localStorage.getItem(KEY) || '{}');
+
+const now = new Date();
+let viewYear = now.getFullYear();
+let viewMonth = now.getMonth();
+
+const cal = document.getElementById('calendar');
+const monthLabel = document.getElementById('monthLabel');
+const monthDone = document.getElementById('monthDone');
+const streakEl = document.getElementById('streak');
+const taskName = document.getElementById('taskName');
+
+taskName.value = localStorage.getItem(TASK_KEY) || '今日任务';
+taskName.addEventListener('input', () => localStorage.setItem(TASK_KEY, taskName.value));
+
+function keyOf(y,m,d){
+  return `${y}-${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+}
+function sameDay(a,b){
+  return a.getFullYear()===b.getFullYear() && a.getMonth()===b.getMonth() && a.getDate()===b.getDate();
+}
+function save(){
+  localStorage.setItem(KEY, JSON.stringify(done));
+}
+function calcStreak(){
+  let count=0;
+  const d=new Date();
+  d.setHours(0,0,0,0);
+
+  // 若今天还没打卡，则从昨天开始计算已连续完成天数
+  let k=keyOf(d.getFullYear(),d.getMonth(),d.getDate());
+  if(!done[k]) d.setDate(d.getDate()-1);
+
+  while(true){
+    const kk=keyOf(d.getFullYear(),d.getMonth(),d.getDate());
+    if(done[kk]){
+      count++;
+      d.setDate(d.getDate()-1);
+    }else break;
+  }
+  return count;
+}
+function render(){
+  cal.innerHTML='';
+  monthLabel.textContent=`${viewYear} 年 ${viewMonth+1} 月`;
+
+  const first=new Date(viewYear,viewMonth,1);
+  const days=new Date(viewYear,viewMonth+1,0).getDate();
+  const mondayIndex=(first.getDay()+6)%7;
+
+  for(let i=0;i<mondayIndex;i++){
+    const e=document.createElement('div');
+    e.className='day empty';
+    cal.appendChild(e);
+  }
+
+  let count=0;
+  for(let d=1;d<=days;d++){
+    const date=new Date(viewYear,viewMonth,d);
+    const k=keyOf(viewYear,viewMonth,d);
+    if(done[k]) count++;
+
+    const box=document.createElement('div');
+    box.className='day'+(done[k]?' done':'')+(sameDay(date,now)?' today':'');
+    box.innerHTML=`<div class="num">${d}</div><div class="check">${done[k]?'✓':''}</div>`;
+
+    box.addEventListener('click',()=>{
+      done[k]=!done[k];
+      if(!done[k]) delete done[k];
+      save();
+      render();
+    });
+    cal.appendChild(box);
+  }
+  monthDone.textContent=count;
+  streakEl.textContent=calcStreak();
+}
+
+document.getElementById('prev').onclick=()=>{
+  viewMonth--;
+  if(viewMonth<0){viewMonth=11;viewYear--;}
+  render();
+};
+document.getElementById('next').onclick=()=>{
+  viewMonth++;
+  if(viewMonth>11){viewMonth=0;viewYear++;}
+  render();
+};
+
+render();
+</script>
+</body>
+</html>
